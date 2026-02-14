@@ -1,0 +1,40 @@
+name: Build ESP32 Firmware
+
+on:
+  workflow_dispatch:  # Manuel çalıştırmaya izin verir
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install ESP IDF
+        run: |
+          curl -LO https://github.com/esp-rs/rust-build/releases/download/v1.2.0/install-rust-toolchain.sh
+          chmod +x install-rust-toolchain.sh
+          ./install-rust-toolchain.sh
+          source ~/export-esp.sh
+      
+      - name: Build Web UI
+        run: |
+          cd vue-ui
+          npm install
+          npm run build
+          cd ..
+      
+      - name: Build Firmware for ESP32
+        run: |
+          source ~/export-esp.sh
+          # Chip konfigürasyonunu esp32 yap
+          echo '[package.metadata.esp-idf]' >> Cargo.toml
+          echo 'chip = "esp32"' >> Cargo.toml
+          cargo build --release
+      
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: evil-apple-juice-firmware
+          path: target/xtensa-esp32-espidf/release/*.bin
