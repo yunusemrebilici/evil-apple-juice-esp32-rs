@@ -1,7 +1,7 @@
 name: Build ESP32 Firmware
 
 on:
-  workflow_dispatch:  # Manuel çalıştırmaya izin verir
+  workflow_dispatch:
 
 jobs:
   build:
@@ -11,12 +11,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Install ESP IDF
+      - name: Install ESP Rust Toolchain
         run: |
-          curl -LO https://github.com/esp-rs/rust-build/releases/download/v1.2.0/install-rust-toolchain.sh
-          chmod +x install-rust-toolchain.sh
-          ./install-rust-toolchain.sh
+          # Önce curl'ü yükle (genelde var ama garanti olsun)
+          sudo apt-get update
+          sudo apt-get install -y curl
+          
+          # Rust'ı kur
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source ~/.cargo/env
+          
+          # ESP toolchain'i kur
+          cargo install espup
+          espup install
           source ~/export-esp.sh
+      
+      - name: Install Node.js for Web UI
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
       
       - name: Build Web UI
         run: |
@@ -25,12 +38,19 @@ jobs:
           npm run build
           cd ..
       
-      - name: Build Firmware for ESP32
+      - name: Configure for ESP32 and Build
         run: |
+          source ~/.cargo/env
           source ~/export-esp.sh
+          
           # Chip konfigürasyonunu esp32 yap
           echo '[package.metadata.esp-idf]' >> Cargo.toml
           echo 'chip = "esp32"' >> Cargo.toml
+          
+          # ESP32-NimBLE konfigürasyonu
+          echo 'esp32-nimble = "0.11"' >> Cargo.toml.tmp
+          
+          # Release build
           cargo build --release
       
       - name: Upload firmware
