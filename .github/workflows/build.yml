@@ -1,32 +1,67 @@
-name: Build ESP32 Firmware
+name: Rust Checks
 
 on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build:
+  # Normal Rust kontrolleri
+  checks:
+    strategy:
+      matrix:
+        job: [build, fmt, clippy]
+        include:
+          - job: build
+            args: --release
+          - job: fmt
+            args: --all -- --check --color always
+          - job: clippy
+            args: --workspace -- -D warnings
     runs-on: ubuntu-latest
-    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Run ${{ matrix.job }}
+        run: cargo ${{ matrix.job }} ${{ matrix.args }}
+
+  # ESP32 firmware build
+  build-esp32:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Install ESP Rust Toolchain
+      - name: Remove rust-toolchain.toml (ESP32C3 ayarını kaldır)
         run: |
-          # Önce curl'ü yükle (genelde var ama garanti olsun)
-          sudo apt-get update
-          sudo apt-get install -y curl
-          
-          # Rust'ı kur
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          source ~/.cargo/env
-          
-          # ESP toolchain'i kur
+          rm -f rust-toolchain.toml || true
+      
+      - name: Setup Rust for ESP32
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: xtensa-esp32-espidf
+          override: true
+          components: rust-src
+      
+      - name: Install ESP IDF
+        run: |
           cargo install espup
           espup install
-          source ~/export-esp.sh
+          source "$HOME/export-esp.sh"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "LIBCLANG_PATH=$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/" >> $GITHUB_ENV
       
-      - name: Install Node.js for Web UI
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
@@ -38,22 +73,23 @@ jobs:
           npm run build
           cd ..
       
-      - name: Configure for ESP32 and Build
+      - name: Configure for ESP32
         run: |
-          source ~/.cargo/env
-          source ~/export-esp.sh
+          # Cargo.toml'a chip konfigürasyonunu ekle
+          if ! grep -q "package.metadata.esp-idf" Cargo.toml; then
+            echo '[package.metadata.esp-idf]' >> Cargo.toml
+            echo 'chip = "esp32"' >> Cargo.toml
+          fi
           
-          # Chip konfigürasyonunu esp32 yap
-          echo '[package.metadata.esp-idf]' >> Cargo.toml
-          echo 'chip = "esp32"' >> Cargo.toml
-          
-          # ESP32-NimBLE konfigürasyonu
-          echo 'esp32-nimble = "0.11"' >> Cargo.toml.tmp
-          
-          # Release build
+          # esp32-nimble'ı düzelt
+          sed -i 's/esp32-nimble.*/esp32-nimble = "0.11"/g' Cargo.toml
+      
+      - name: Build Firmware
+        run: |
+          source "$HOME/export-esp.sh"
           cargo build --release
       
-      - name: Upload firmware
+      - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
           name: evil-apple-juice-firmware
